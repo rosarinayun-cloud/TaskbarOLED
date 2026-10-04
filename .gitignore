@@ -1,5 +1,6 @@
 dist/
 *.exe
+*.dll
 *.pdb
 *.log
 *.lnk

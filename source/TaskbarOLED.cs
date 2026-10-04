@@ -25,7 +25,7 @@ internal static class Native {
     [DllImport("user32.dll")] public static extern bool GetMonitorInfo(IntPtr h, ref MONITORINFO m);
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int w, int height, uint flags);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int command);
-    [DllImport("user32.dll")] public static extern bool SetLayeredWindowAttributes(IntPtr h, uint key, byte alpha, uint flags);
+    [DllImport("user32.dll", SetLastError=true)] public static extern bool SetLayeredWindowAttributes(IntPtr h, uint key, byte alpha, uint flags);
     [DllImport("user32.dll")] public static extern bool RegisterHotKey(IntPtr h, int id, uint modifiers, uint key);
     [DllImport("user32.dll")] public static extern bool UnregisterHotKey(IntPtr h, int id);
     [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr context);
@@ -59,7 +59,7 @@ internal sealed class Dimmer : Form {
         var pauseItem=new ToolStripMenuItem("Pause / resume");
         pauseItem.Click += delegate { paused=!paused; pauseItem.Checked=paused; lastInteraction=clock.ElapsedMilliseconds; SetDim(false,"paused",Rectangle.Empty); };
         menu.Items.Add(pauseItem);
-        menu.Items.Add("Exit (Ctrl+Alt+Shift+O)",null,delegate { Quit(); });
+        menu.Items.Add(hotkey?"Exit (Ctrl+Alt+Shift+O)":"Exit",null,delegate { Quit(); });
         tray=new NotifyIcon { Icon=SystemIcons.Application, Text="Taskbar OLED - 60s idle", ContextMenuStrip=menu, Visible=true };
         tray.Text="Taskbar OLED - "+idle+"s idle";
         timer.Interval=poll; timer.Tick += Tick; timer.Start();
@@ -137,8 +137,10 @@ internal sealed class Dimmer : Form {
         } catch(Exception ex) { SetDim(false,"error",Rectangle.Empty); Log(ex.ToString()); }
     }
     protected override void Dispose(bool disposing) {
-        if(disposing) {
-            timer.Stop(); timer.Dispose(); Native.ShowWindow(Handle,0); Native.UnregisterHotKey(Handle,1);
+        if(disposing && !IsDisposed) {
+            timer.Stop(); timer.Dispose();
+            // Accessing Handle after it has been destroyed can recreate a window.
+            if(IsHandleCreated) { Native.ShowWindow(Handle,0); Native.UnregisterHotKey(Handle,1); }
             if(tray!=null) { tray.Visible=false; tray.ContextMenuStrip.Dispose(); tray.Dispose(); }
             Log("EXIT overlay-hidden");
         }
@@ -147,6 +149,8 @@ internal sealed class Dimmer : Form {
 }
 
 internal static class Program {
+    // Keep this published IPC name for single-instance / --stop compatibility.
+    // It is not a version identifier or an idle-time setting.
     const string InstanceName="Local\\TaskbarOLED.Study.60s.v1";
     static int Read(string key,int fallback,int min,int max) {
         string path=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"TaskbarOLED.ini");
